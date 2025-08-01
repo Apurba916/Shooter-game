@@ -1,0 +1,228 @@
+import pygame
+import math
+import random
+
+# Initialize Pygame
+pygame.init()
+pygame.mixer.init() # Initialize the mixer for sound effects
+
+# Set up the display
+WIDTH = 800
+HEIGHT = 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Be prepared to Shoot!")
+
+# Colors
+WHITE = (255, 255, 255)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+
+# Load sound effect
+# Make sure 'laser-312360.mp3' is in the same directory as your script
+try:
+    shoot_sound = pygame.mixer.Sound("laser-312360.mp3")
+    shoot_sound.set_volume(0.5) # Adjust volume (0.0 to 1.0)
+except pygame.error as e:
+    print(f"Could not load sound file: {e}")
+    shoot_sound = None # Set to None if loading fails, to avoid errors later
+
+# Player class definition (unchanged)
+class Player:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.speed = 5
+        self.radius = 20
+        self.angle = 0
+
+    def move(self, keys):
+        if keys[pygame.K_w]:
+            self.y -= self.speed
+        if keys[pygame.K_s]:
+            self.y += self.speed
+        if keys[pygame.K_a]:
+            self.x -= self.speed
+        if keys[pygame.K_d]:
+            self.x += self.speed
+        
+        # Keep player on screen
+        self.x = max(self.radius, min(WIDTH - self.radius, self.x))
+        self.y = max(self.radius, min(HEIGHT - self.radius, self.y))
+
+    def rotate(self, mouse_pos):
+        # Calculate angle based on mouse position
+        dx = mouse_pos[0] - self.x
+        dy = mouse_pos[1] - self.y
+        self.angle = math.atan2(dy, dx)
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, WHITE, (int(self.x), int(self.y)), self.radius)
+        # Draw the aiming line
+        end_x = self.x + math.cos(self.angle) * (self.radius + 10)
+        end_y = self.y + math.sin(self.angle) * (self.radius + 10)
+        pygame.draw.line(screen, RED, (self.x, self.y), (end_x, end_y), 3)
+
+# Bullet class definition (unchanged)
+class Bullet:
+    def __init__(self, x, y, angle):
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.speed = 10
+        self.radius = 5
+
+    def move(self):
+        self.x += math.cos(self.angle) * self.speed
+        self.y += math.sin(self.angle) * self.speed
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, RED, (int(self.x), int(self.y)), self.radius)
+
+    def off_screen(self):
+        return (self.x < 0 or self.x > WIDTH or self.y < 0 or self.y > HEIGHT)
+
+# NEW: Ball class for enemies
+class Ball:
+    def __init__(self, x, y, radius, speed_x, speed_y):
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.speed_x = speed_x
+        self.speed_y = speed_y
+        self.color = GREEN
+
+    def move(self):
+        self.x += self.speed_x
+        self.y += self.speed_y
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
+
+    def off_screen(self):
+        # Check if the ball has moved completely off-screen
+        return (self.x < -self.radius or self.x > WIDTH + self.radius or 
+                self.y < -self.radius or self.y > HEIGHT + self.radius)
+
+# NEW: Function to spawn a new ball from a random side
+def spawn_ball():
+    radius = random.randint(15, 30)
+    speed = random.uniform(1, 3)
+    side = random.choice(['top', 'bottom', 'left', 'right'])
+
+    if side == 'top':
+        x = random.randint(0, WIDTH)
+        y = -radius
+        speed_x = random.uniform(-1, 1) * speed
+        speed_y = speed
+    elif side == 'bottom':
+        x = random.randint(0, WIDTH)
+        y = HEIGHT + radius
+        speed_x = random.uniform(-1, 1) * speed
+        speed_y = -speed
+    elif side == 'left':
+        x = -radius
+        y = random.randint(0, HEIGHT)
+        speed_x = speed
+        speed_y = random.uniform(-1, 1) * speed
+    else: # right
+        x = WIDTH + radius
+        y = random.randint(0, HEIGHT)
+        speed_x = -speed
+        speed_y = random.uniform(-1, 1) * speed
+
+    return Ball(x, y, radius, speed_x, speed_y)
+
+# Global lists to hold all active bullets and balls
+bullets = []
+balls = []
+
+# Create player instance
+player = Player(WIDTH // 2, HEIGHT // 2)
+
+# Game loop variables
+running = True
+clock = pygame.time.Clock()
+
+# NEW: Timer to control ball spawning
+BALL_SPAWN_INTERVAL = 100 # Spawn a new ball every 100 frames
+ball_spawn_timer = BALL_SPAWN_INTERVAL
+
+# Main game loop
+while running:
+    # Event handling
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                bullets.append(Bullet(player.x, player.y, player.angle))
+                if shoot_sound: # Play sound only if it was loaded successfully
+                    shoot_sound.play()
+
+    # Get current input states
+    keys = pygame.key.get_pressed()
+    mouse_pos = pygame.mouse.get_pos()
+
+    # Update player's position and rotation
+    player.move(keys)
+    player.rotate(mouse_pos)
+
+    # --- NEW: Spawn new balls based on timer ---
+    ball_spawn_timer -= 1
+    if ball_spawn_timer <= 0:
+        balls.append(spawn_ball())
+        ball_spawn_timer = BALL_SPAWN_INTERVAL
+    
+    # --- NEW: Collision detection and updates ---
+    # Update and check for collisions for bullets and balls
+    for bullet in bullets[:]:  # Iterate over a copy to allow safe removal
+        bullet.move()
+        # Remove bullets that are off-screen
+        if bullet.off_screen():
+            bullets.remove(bullet)
+            continue # Move to the next bullet
+
+        # Check for bullet-ball collisions
+        for ball in balls[:]:
+            distance = math.sqrt((bullet.x - ball.x)**2 + (bullet.y - ball.y)**2)
+            if distance < bullet.radius + ball.radius:
+                bullets.remove(bullet)
+                balls.remove(ball)
+                break # Exit the inner loop since the bullet is gone
+    
+    # Update and draw balls
+    for ball in balls[:]:
+        ball.move()
+        # Remove balls that have gone off-screen
+        if ball.off_screen():
+            balls.remove(ball)
+            continue
+        
+        # Check for player-ball collisions (Game Over condition)
+        distance = math.sqrt((player.x - ball.x)**2 + (player.y - ball.y)**2)
+        if distance < player.radius + ball.radius:
+            print("Game Over!")
+            running = False # End the game loop
+
+    # --- Drawing section ---
+    screen.fill((0, 0, 0)) # Clear screen first
+
+    # Draw all bullets
+    for bullet in bullets:
+        bullet.draw(screen)
+
+    # Draw all balls
+    for ball in balls:
+        ball.draw(screen)
+
+    # Draw player
+    player.draw(screen)
+
+    # Update display
+    pygame.display.flip()
+    
+    # Control game frame rate
+    clock.tick(60)
+
+# Quit Pygame and exit
+pygame.quit()
